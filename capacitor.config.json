@@ -1,0 +1,7 @@
+
+{
+  "appId": "com.smartflash.control",
+  "appName": "Smart Flash Control",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}

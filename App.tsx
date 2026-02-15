@@ -1,23 +1,21 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { 
-  Settings, 
-  Power, 
-  Zap, 
-  Sun, 
-  Moon, 
-  AlertTriangle, 
-  Battery, 
-  Thermometer,
-  PlusCircle,
-  X
-} from 'lucide-react';
+import { X } from 'lucide-react';
+import { registerPlugin, Capacitor } from '@capacitor/core';
 import Header from './components/Header';
 import FlashSlider from './components/FlashSlider';
 import ActionButtons from './components/ActionButtons';
 import PresetList from './components/PresetList';
 import StatusBar from './components/StatusBar';
-import { Mode, Preset, AppState } from './types';
+import { Mode, Preset } from './types';
+
+// 네이티브 플래시 플러그인 인터페이스 정의
+interface FlashPlugin {
+  toggle(options: { state: boolean }): Promise<void>;
+  setBrightness(options: { level: number }): Promise<void>;
+}
+
+const Flash = registerPlugin<FlashPlugin>('Flash');
 
 const INITIAL_PRESETS: Preset[] = [
   { id: '1', label: 'Reading', value: 20 },
@@ -34,57 +32,43 @@ const App: React.FC = () => {
   const [temp, setTemp] = useState(32);
   const [showSettings, setShowSettings] = useState(false);
 
-  // Fix: Use ReturnType<typeof setInterval> instead of NodeJS.Timeout to avoid missing namespace error in browser environments
   const sosIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const videoTrackRef = useRef<MediaStreamTrack | null>(null);
 
-  // Hardware control simulation / implementation
-  // Note: Most browsers only support 'torch' boolean. 
-  // Brightness levels (PWM) are generally handled at the OS level or through native bridge.
-  useEffect(() => {
-    const initCamera = async () => {
+  // 네이티브 하드웨어 제어 함수
+  const updateHardwareFlash = useCallback(async (state: boolean, level: number) => {
+    if (Capacitor.isNativePlatform()) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' }
-        });
-        const track = stream.getVideoTracks()[0];
-        videoTrackRef.current = track;
-      } catch (err) {
-        console.warn("Camera flash not accessible in this environment or permission denied.");
-      }
-    };
-    initCamera();
-    return () => {
-      videoTrackRef.current?.stop();
-    };
-  }, []);
-
-  const updateHardwareFlash = useCallback(async (state: boolean) => {
-    if (videoTrackRef.current) {
-      const capabilities = videoTrackRef.current.getCapabilities() as any;
-      if (capabilities.torch) {
-        try {
-          await videoTrackRef.current.applyConstraints({
-            advanced: [{ torch: state }]
-          } as any);
-        } catch (e) {
-          console.error("Failed to toggle torch", e);
+        if (state) {
+          // 밝기 설정 후 켜기 (Android Camera2 API 레벨 매핑: 0-100 -> 기기별 max)
+          await Flash.setBrightness({ level });
+          await Flash.toggle({ state: true });
+        } else {
+          await Flash.toggle({ state: false });
         }
+      } catch (e) {
+        console.error("Native Flash Control Error", e);
       }
+    } else {
+      console.warn("Flash brightness control is only available on native Android devices.");
     }
   }, []);
 
-  // Sync Hardware with State
+  // 상태 변경 시 하드웨어 동기화
   useEffect(() => {
-    if (mode === Mode.SOS) return; // SOS handles its own flashing
-    updateHardwareFlash(isOn);
-  }, [isOn, mode, updateHardwareFlash]);
+    if (mode !== Mode.SOS) {
+      updateHardwareFlash(isOn, brightness);
+    }
+  }, [isOn, brightness, mode, updateHardwareFlash]);
 
-  // SOS Mode Logic
+  // SOS 모드 로직 (네이티브 연동)
   useEffect(() => {
     if (mode === Mode.SOS && isOn) {
+      let currentFlashState = true;
       sosIntervalRef.current = setInterval(() => {
-        setIsOn(prev => !prev);
+        currentFlashState = !currentFlashState;
+        if (Capacitor.isNativePlatform()) {
+          Flash.toggle({ state: currentFlashState });
+        }
       }, 500);
     } else {
       if (sosIntervalRef.current) {
@@ -112,22 +96,13 @@ const App: React.FC = () => {
   };
 
   const toggleMode = (newMode: Mode) => {
-    if (mode === newMode) {
-      setMode(Mode.STANDARD);
-    } else {
-      setMode(newMode);
-    }
+    setMode(prev => prev === newMode ? Mode.STANDARD : newMode);
   };
 
   const addPreset = () => {
     const label = prompt("Preset Name:", `Level ${brightness}%`);
     if (label) {
-      const newPreset: Preset = {
-        id: Date.now().toString(),
-        label,
-        value: brightness
-      };
-      setPresets([...presets, newPreset]);
+      setPresets([...presets, { id: Date.now().toString(), label, value: brightness }]);
     }
   };
 
@@ -137,9 +112,7 @@ const App: React.FC = () => {
 
   return (
     <div className={`relative flex flex-col h-screen w-full max-w-md mx-auto transition-colors duration-500 ${mode === Mode.NIGHT ? 'bg-red-950/20' : 'bg-[#0a0a0a]'}`}>
-      
       <Header onOpenSettings={() => setShowSettings(true)} />
-
       <StatusBar battery={battery} temperature={temp} />
 
       <main className="flex-1 flex flex-col items-center justify-center px-8 relative">
@@ -198,15 +171,15 @@ const App: React.FC = () => {
               </div>
             </section>
             <section className="bg-zinc-800/50 p-4 rounded-2xl">
-              <h3 className="text-zinc-400 text-sm mb-2">Display</h3>
+              <h3 className="text-zinc-400 text-sm mb-2">Device Status</h3>
               <div className="flex justify-between items-center">
-                <span>Haptic Feedback</span>
-                <div className="w-12 h-6 bg-green-500 rounded-full relative">
-                   <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full"></div>
-                </div>
+                <span>Native Bridge</span>
+                <span className={Capacitor.isNativePlatform() ? "text-green-500" : "text-yellow-500"}>
+                  {Capacitor.isNativePlatform() ? "Connected" : "Web Preview"}
+                </span>
               </div>
             </section>
-            <p className="text-zinc-500 text-xs text-center pt-8">Smart Flash Control v1.0.0</p>
+            <p className="text-zinc-500 text-xs text-center pt-8">Smart Flash Control v1.1.0 (Native Hybrid)</p>
           </div>
         </div>
       )}
