@@ -6,7 +6,6 @@ import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.os.Build;
-import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -43,7 +42,7 @@ public class FlashPlugin extends Plugin {
                 cameraManager.setTorchMode(cameraId, state);
                 call.resolve();
             } else {
-                call.reject("Flash not available");
+                call.reject("Flash not available on this device");
             }
         } catch (Exception e) {
             call.reject(e.getLocalizedMessage());
@@ -56,25 +55,23 @@ public class FlashPlugin extends Plugin {
         try {
             if (cameraId != null) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    // API 33 이상: 하드웨어 레벨 제어 지원
                     CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
                     Integer maxLevel = characteristics.get(CameraCharacteristics.FLASH_SINGLE_STRENGTH_MAX_LEVEL);
                     
                     if (maxLevel != null && maxLevel > 1) {
-                        // 1% 단위를 하드웨어 레벨로 매핑
-                        int actualLevel = (int) Math.max(1, (levelInput / 100.0) * maxLevel);
+                        // 1% 단위를 하드웨어 레벨로 변환 (1 ~ maxLevel)
+                        int actualLevel = (int) Math.max(1, Math.round((levelInput / 100.0) * maxLevel));
                         cameraManager.setTorchModeWithLevel(cameraId, actualLevel);
                     } else {
-                        // 레벨 제어 미지원 기기는 On/Off로 대체
                         cameraManager.setTorchMode(cameraId, true);
                     }
                 } else {
-                    // API 33 미만: On/Off만 가능
+                    // API 33 미만은 밝기 조절 하드웨어 권한이 없으므로 단순 ON
                     cameraManager.setTorchMode(cameraId, true);
                 }
                 call.resolve();
             } else {
-                call.reject("Flash not available");
+                call.reject("Flash hardware not found");
             }
         } catch (Exception e) {
             call.reject(e.getLocalizedMessage());
