@@ -1,0 +1,7 @@
+{
+  "name": "Smart Flash Control",
+  "description": "A high-precision smartphone flash controller with 1% brightness increments, presets, and SOS functionality.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
